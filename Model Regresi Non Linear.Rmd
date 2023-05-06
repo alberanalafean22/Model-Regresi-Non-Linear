@@ -1,0 +1,224 @@
+---
+title: "Model Regresi Non linear"
+author: "KELOMPOK 6"
+date: "2023-04-16"
+output: html_document
+---
+
+#Dataset
+Pada model ini menggunakan dataset mengenai Tanaman Padi yang ada di Sumatera. 
+```{r}
+library(knitr)
+library(MASS)
+library(boot)
+library(ggplot2)
+library(MASS)
+library(leaps)
+library(glmnet)
+library(ISLR)
+library(pls)
+library(tidyverse)
+library(mlr3tuning)
+library(paradox)
+library(kknn)
+library(ggpubr)
+library(smotefamily)
+library(glmnet)
+library(kableExtra)
+library(DataExplorer)      
+```
+
+```{r}
+data <- read.csv("Data_Tanaman_Padi_Sumatera_version_1.csv")
+str(data)
+attach(data)
+```
+
+### i)Pengantar dataset
+Respon : Produksi, Variabel Prediktor: Curah.hujan
+```{r}
+ncol(data) #jumlah prediktor 7
+nrow(data)-1 #jumlah observasi 224
+```
+
+### ii) Akan dilakukan fitting menggunakan regresi polinomial dan regresi splines dan mengevaluasi model dengan melakukan plotting derajad kebebasan dan lakukan cross validation
+### iii)Pembersihan Data
+#### Cek Missing Value
+```{r}
+sum(is.na(data))
+```
+Dilakukan pengecekan bahwa tidak terdapat missing value pada dataset
+
+### iv)Ringkasan deskriptif awal
+#### Ringkasan Numerik
+```{r}
+summary(data)
+```
+
+#### Visualisasi Data
+##### Sebaran Data
+```{r}
+plot_histogram(data = data,nrow=3,ncol = 3,
+               geom_histogram_args = list(fill="steelblue"),
+               ggtheme = theme_bw()
+               )
+```
+
+##### Plot Korelasi
+```{r}
+plot_correlation(data = data %>% 
+                select_if(is.numeric),type = c("all"), maxcat = 40L, title = "Korelasi")
+```
+
+### ii) Pertanyaan yang ingin Anda jawab (Uraikan apa saja yang ingin anda tinjau)
+## Plot prduksi vs curah hujan
+```{r}
+#data(data)
+set.seed(10)
+fit <- lm(Produksi~poly(Curah.hujan, 3), data=data) #derajat 3
+```
+
+```{r}
+Curahhujanlims <- range(Curah.hujan)
+Curahhujan.grid <- seq(from = Curahhujanlims[1], to = Curahhujanlims[2], by = 0.1)
+prediksi <- predict(fit, list(Curah.hujan = Curahhujan.grid))
+plot(Produksi ~ Curah.hujan, data = data, col = "lightblue")
+lines(Curahhujan.grid, prediksi, col = "steelblue", lwd = 2)
+```
+## Plot fitting polynomial berbagai derajat(1 sampai 10) dan juga RSS
+```{r}
+set.seed(10)
+rss <- rep(NA, 10)
+for (i in 1:10) {
+  lm.fit2 <- lm(Produksi ~ poly(Curah.hujan, i), data = data)
+  rss[i] <- sum(lm.fit2$residuals^2)
+}
+rss
+```
+
+```{r}
+plot(1:10, rss, xlab = "Polynomial Degree", ylab = "RSS", type = "l")
+d.min <- which.min(rss)
+points(which.min(rss), rss[which.min(rss)], col = "red", cex = 2, pch = 20)
+#sehingga derajat polinom didapat, berdasarkan plot adalah 10
+```
+## Validasi silang untuk memilih derajat optimal polinomial
+```{r}
+library(boot)
+set.seed(123)
+deltas1 <- rep(NA, 10)
+for (i in 1:10) {
+  fitc <- glm(Produksi~poly(Curah.hujan, i), data = data)
+  deltas1[i] <- cv.glm(data, fitc,K = 10)$delta[1]
+}
+plot(1:10, deltas1, xlab = "Degree",
+ylab = "Test Error", type = "l")
+d.minn <- which.min(deltas1)
+points(which.min(deltas1), deltas1[which.min(deltas1)], col = "red",
+cex = 2, pch = 20)
+
+#sehingga berdasarkan plot, derajat optimal polinom adalah 1
+```
+```{r}
+d.minn <- which.min(deltas1)
+d.minn
+```
+## Spline regresi untuk memprediksi Produksi megunakan Curah hujan. Menampilkan output fitting pada df=4 besera plot
+
+```{r}
+library(splines)
+bs.fit1 <- lm(Produksi~ ns(Curah.hujan, df=4) ,data = data)
+#kable(coef(summary(bs.fit1)))
+pred <- predict(bs.fit1, newdata=list(Curahhujan = Curahhujan.grid),se=T)
+plot(Produksi ~ Curah.hujan, data = data, col = "lightgreen")
+lines(Curahhujan.grid, pred$bs.fit1, col = "blue", lwd = 2)
+title("Spline with four degrees of freedom")
+```
+
+
+```{r}
+# summary fitting
+bs.fit <- lm(Produksi ~ ns(Curah.hujan, df=4, knots = c(5, 9, 13)), data = data) #mengunakn fungsi ns ,dengan knot(simpul)= 5,9,13
+bs.fit1 <- lm(Produksi ~ ns(Curah.hujan, df=4) ,data = data)
+summary(bs.fit1)
+head(coef(summary(bs.fit1)))
+attr(bs(Curah.hujan ,df=4) ,"knots ")
+pred <- predict(bs.fit1, list(Curah.hujan = Curahhujan.grid))
+```
+
+
+```{r}
+#Plot model fit
+plot(Produksi ~ Curah.hujan, data = data, col = "steelblue")
+lines(Curahhujan.grid, pred, col = "red", lwd = 2)
+title("Spline with four degrees of freedom")
+```
+## validasi silang untuk memilih df terbaik untuk spline regresi pada data ini
+```{r}
+library(boot)
+library(splines)
+set.seed(123)
+cv <- rep(NA, 10)
+for (i in 3:16) {
+  fit <- glm(Produksi ~ poly(Curah.hujan, df = i), data = data)
+  cv[i] <- cv.glm(data, fit, K = 10)$delta[1]
+}
+plot(3:16, cv[-c(1, 2)], xlab = "Degrees of freedom", ylab = "Test error", type = "l")
+d.min <- which.min(cv)
+points(which.min(cv), cv[which.min(cv)], col = "red", cex = 2, pch = 20)
+#berdasrkan plot df terbaik adalah 1
+
+```
+
+
+# v) Metode klasifikasi yang digunakan dan uji anova
+#metode klasifikasi yang digunakan pada kode adalah klasifikasi regresi logistik
+```{r}
+fit.1=lm(Produksi~Curah.hujan,data=data)
+fit.2=lm(Produksi~poly(Curah.hujan,2),data=data)
+fit.3=lm(Produksi~poly(Curah.hujan,3),data=data)
+fit.4=lm(Produksi~poly(Curah.hujan,4),data=data)
+fit.5=lm(Produksi~poly(Curah.hujan,5),data=data)
+anova(fit.1,fit.2,fit.3,fit.4,fit.5)
+
+```
+
+```{r}
+coef(summary(fit.5))
+```
+
+```{r}
+fit.1=lm(Produksi~Kelembapan+Curah.hujan,data=data)
+fit.2=lm(Produksi~Kelembapan+poly(Curah.hujan,2),data=data)
+fit.3=lm(Produksi~Kelembapan+poly(Curah.hujan,3),data=data)
+anova(fit.1,fit.2,fit.3)
+
+```
+```{r}
+fit=glm(I(Produksi>1700000)~poly(Curah.hujan,4),data=data, family=binomial)
+fit #menampilkan fit dengan metode klasfikasi regresi logistik pada Produksi yang lebih dari 1.700.000
+```
+
+```{r}
+preds=predict(fit,newdata=list(curahhujan=Curahhujan.grid ),se=T)
+summary(preds)
+```
+
+```{r}
+pfit=exp(preds$fit)/(1+exp(preds$fit))
+se.bands.logit=cbind(preds$fit+2*preds$se.fit, preds$fit-2*preds$se.fit)
+se.bands=exp(se.bands.logit)/(1+exp(se.bands.logit))
+summary(se.bands)
+```
+```{r}
+preds=predict(fit,newdata=list(curahhujan=Curahhujan.grid),type="response", se=T)
+summary(preds)
+
+```
+```{r}
+table(cut(Curah.hujan,4))
+```
+```{r}
+fit=lm(Produksi~cut(Curah.hujan,4),data=data)
+coef(summary(fit))
+```
